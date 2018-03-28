@@ -20,12 +20,12 @@ function errOut(msg = '') {
 	process.exit(1);
 }
 
-function checkAgent() {
-	const AGENT_PATH = 'javaapi/Agent.class';
-	if(! fs.existsSync(AGENT_PATH)) {
-		errOut(`Can not find ${AGENT_PATH}`);
-	}
-}
+//function checkAgent() {
+//	const AGENT_PATH = 'wut/Agent.class';
+//	if(! fs.existsSync(AGENT_PATH)) {
+//		errOut(`Can not find ${AGENT_PATH}`);
+//	}
+//}
 
 function checkTester() {
 	if(tester.isTesting() && ! isOwnWork()) {
@@ -52,9 +52,10 @@ function setupCPNL(tXXXXXX, tpFullName) {
 		: `javaapi.${tpFullName}.class`;
 	const socFileName = `${tXXXXXX}/${tpFullName}.soc`;
 	tester.cd(tXXXXXX);
-	tester.proset('javaapi.Agent.class');
+	tester.proset('wut.Agent.class');
 	tester.socket(socFileName);
 	setTpClass(classFileName);
+	setTpPath(tXXXXXX + '/');
 }
 
 function enableLog(dir, flow, tpFullName, logName) {
@@ -73,6 +74,10 @@ function enableLog(dir, flow, tpFullName, logName) {
 
 function setFlow(flow) {
 	tester.sysvar([['ECOTS_SD_STEP', "Debug"], ['ECOTS_SD_RESCREEN', 0], ['ECOTS_SD_DATALOGDISP', 'ON']]);
+}
+
+function setTpPath(name) {
+	tester.sysvar([['ECOTS_SD_TPPATH', name]]);
 }
 
 function setTpClass(name) {
@@ -109,14 +114,14 @@ function sync() {
 
 	console.log(`Syncing to ${dstDir}`);
 	tester.callSync('mkdir', '-p', dstDir);
-	tester.callSync('rsync', '-az', '--delete', '--force', '--exclude=*5831', '--exclude=*5773', '--exclude=saveflows/', '--exclude=datalogs/', '--exclude=*.java', '--exclude=*.asc', '--exclude=*.prep', '--exclude=.svn/', srcDir, path.dirname(dstDir));
+	tester.callSync('rsync', '-az', '--delete', '--force', '--exclude=.*.swp', '--exclude=*5831', '--exclude=*5773', '--exclude=saveflows/', '--exclude=datalogs/', '--exclude=*.java', '--exclude=*.asc', '--exclude=*.prep', '--exclude=.svn/', srcDir, path.dirname(dstDir));
 	return dstDir;
 }
 
 function tpModified() {
 	const srcDir = process.env.PWD;
 	const dstDir = srcDir.replace('/nfsusers/', '/sandbox/');
-	const msg = tester.callSync('rsync', '-nvr', '--exclude=*5831', '--exclude=*5773', '--exclude=saveflows/', '--exclude=datalogs/', '--exclude=*.java', '--exclude=*.asc', '--exclude=*.prep', '--exclude=.svn/', srcDir, path.dirname(dstDir));
+	const msg = tester.callSync('rsync', '-nvr', '--exclude=.*.swp', '--exclude=*5831', '--exclude=*5773', '--exclude=saveflows/', '--exclude=datalogs/', '--exclude=*.java', '--exclude=*.asc', '--exclude=*.prep', '--exclude=.svn/', srcDir, path.dirname(dstDir));
 	const basename = path.basename(srcDir);
 	const modFiles = msg.split('\n').filter(s => s.includes(basename));
 	const isMod = modFiles.length > 0;
@@ -136,7 +141,7 @@ async function extract(tpZip) {
 async function run() {
 	cntr();
 	await back();
-	if(! tester.isTesting() && tpModified()) {
+	if(tpModified()) {
 		tester.proreset();
 		tester.userproreset();
 		tester.clear();
@@ -151,7 +156,7 @@ async function run() {
 
 	for(let flow of flows) {
 		setFlow(flow);
-		setFlowItems(tbArr);
+		setFlowItems([...tbArr, 'End Of Flow']);
 		enableLog(logDir, flow, tpFullName, logName);
 
 		console.log(`Running \n\t${tbArr.join('\n\t')}`);
@@ -165,6 +170,6 @@ if(process.argv.length < 4) {
 	help();
 }
 checkTester();
-checkAgent();
+//checkAgent();
 run();
 
