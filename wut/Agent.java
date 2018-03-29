@@ -1,23 +1,8 @@
 package wut;
 
-import javaapi.TestFlow;
-import javaapi.Seq_Test_Flow;
-import javaapi.TestItemList;
-import javaapi.DeviceInfo;
-import javaapi.EndOfFlow;
-import javaapi.TestItem;
-import javaapi.SS;
-import javaapi.NoSuchConditionException;
-import javaapi.NoMoreTargetDutException;
-
-import java.util.Arrays;
 import java.util.Map;
-import java.util.HashMap;
-import java.util.List;
-import java.util.ArrayList;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
-import java.lang.reflect.Constructor;
 
 import com.advantest.kei.KSystemVariable;
 import com.advantest.kei.KDeviceTestProgram;
@@ -25,18 +10,20 @@ import com.advantest.kei.KTestItemRegistry;
 import com.advantest.kei.KTestItem;
 import com.advantest.kei.IKNoMoreTargetDutAction;
 import com.advantest.kei.KVariableRegistry;
-import com.advantest.kei.KVariableRegistry;
 import com.advantest.kei.KNoMoreTargetDutException;
-import com.advantest.kei.KSystemVariable;
 
-public class Agent extends KDeviceTestProgram implements IKNoMoreTargetDutAction{
-	final private String defaultSysVar = "ECOTS_SD_TPCLASS";
+import java.net.URLClassLoader;
+import java.net.MalformedURLException;
+import java.net.URL;
+
+public class Agent extends KDeviceTestProgram implements IKNoMoreTargetDutAction {
+	final private String targetFlow = "Debug";
 	private KDeviceTestProgram currentTp;
+	private TpClassLoader tpLoader;
 
 	@Override public void initializeVariableRegistry(KVariableRegistry arg0) {
-		//   /opt/ATFS/arm/linux/ATFSkss-1.01/T5831/lib
-		//System.out.println("===========================\n" + System.getProperty("java.library.path"));
-		this.currentTp = newInstanceFromSysVar();
+		this.tpLoader = TpClassLoader.from(getTpPath());
+		this.currentTp = (KDeviceTestProgram)newInstance(getTpClassName());
 		this.currentTp.initializeVariableRegistry(arg0);
 	}
 
@@ -47,23 +34,19 @@ public class Agent extends KDeviceTestProgram implements IKNoMoreTargetDutAction
 	@Override public void testStartAction() throws KNoMoreTargetDutException {
 		this.currentTp.testStartAction();
 
-		if(Inject.isTargetFlow(SS.testStep)) {
-			DeviceInfo.datalogOutput = false;
-			CacheTB.init();
-			setTestStartTime();
-			setFlowName(SS.testStep);
+		setTestStartTime();
+		setFlowName(this.targetFlow);
 
-			for(;;) {
-				try {
-					String msg = Signal.poll();
-					Inject.into(this).update(CacheTB.queryTestItems(CacheTB.parse(msg)));
-					break;
-				} catch(Exception e) {
-					System.out.println("\n\n" + e);
-					Signal.lazyReset();
-				}
+		for(;;) {
+			try {
+				String msg = Signal.poll();
+				KTestItem[] tbArr = getTestItemArr(getTbNames(msg));
+				addFlow(this.targetFlow, tbArr);
+				break;
+			} catch(Exception e) {
+				System.out.println("\n\n" + e);
+				Signal.lazyReset();
 			}
-			DeviceInfo.datalogOutput = true;
 		}
 	}
 
@@ -76,201 +59,174 @@ public class Agent extends KDeviceTestProgram implements IKNoMoreTargetDutAction
 	}
 
 	@Override public void noMoreTargetDutAction() {
-		//((IKNoMoreTargetDutAction)this.currentTp).noMoreTargetDutAction();
-		System.out.printf("NoMoreTargetDutException Test End\n");
 		try {
-			Constructor ctor = EndOfFlow.class.getDeclaredConstructor(String.class, boolean.class);
-			ctor.setAccessible(true);
-			TestItem end = (TestItem)ctor.newInstance("End Of Flow", true);
-			((TestItem)getCurrentTestItem()).setCategory();
-			end.body();
+			Method setCategory =  Ano.getMethod(tpLoader.load("javaapi.TestItem"), "setCategory");
+			setCategory.invoke(getCurrentTestItem()); 
+
+			Method body =  Ano.getMethod(tpLoader.load("javaapi.EndOfFlow"), "body");
+			body.invoke(getTestItemArr("End Of Flow")[0]);
 		} catch(Exception e) {
-			if(e instanceof NoMoreTargetDutException) { /*empty*/ }
-			else if(e instanceof NoSuchConditionException) { /*empty*/ }
-			else throw new RuntimeException(e);
+			System.out.println(e);
 		}
 	}
 
-	private void setTestStartTime() {
-		try {
-			Field fd = KDeviceTestProgram.class.getDeclaredField("testStartTime");
-			fd.set(this.currentTp, System.currentTimeMillis());
-		} catch(Exception e) {
-			throw new RuntimeException(e);
-		}
-	}
-
-	private KDeviceTestProgram newInstanceFromSysVar(String... vars) {
-		String sysVar = vars.length == 0 ? defaultSysVar : vars[0];
-		try {
-			Class<?> cls = Class.forName(
-					KSystemVariable.read(sysVar)
-					.replaceAll(".class", "")
-					.replaceAll("/", ".")); //"javaapi.tea3628sh0401_192b"
-			return (KDeviceTestProgram)cls.newInstance();
-		} catch(Exception e) {
-			throw new RuntimeException(e);
-		}
-	}
-}
-
-class CacheTB {
-	final private static Class flowClass = Seq_Test_Flow.class;
-	final private static Class condClass = TestItemList.class;
-	private static Map<String, Map<String, TestFlow>> map;
-	private static TestItemList til;
-	final private static String[] flowOrder = {
-		"FH_Flow",
-		"FR_Flow",
-		"FL_Flow",
-		"SH_Flow",
-		"CFH_Flow",
-		"CSH_Flow",
-		"QH_Flow",
-		"QR_Flow",
-		"QL_Flow",
-		"CH_Flow",
-		"CR_Flow",
-		"CL_Flow",
-		"Debug_Flow",
-		"DebugPats_Flow",
-	};
-
-	final public static void init() {
-		if(map != null && til != null) {
-			return;
-		}
-		map = new HashMap<String, Map<String, TestFlow>>();
-		for(String flow : flowNames()) {
-			Map<String, TestFlow> inFlowMap = new HashMap<String, TestFlow>();
-			for(TestFlow tb : itemsOf(flow)) {
-				inFlowMap.put(tb.testName, tb);
-			}
-			map.put(flow, inFlowMap);
-		}
-
-		try {
-			Constructor ctor = TestItemList.class.getDeclaredConstructor();
-			ctor.setAccessible(true);
-			til = (TestItemList)ctor.newInstance();
-		} catch(Exception e) {
-			throw new RuntimeException(e);
-		}
-		stat();
-	}
-
-	final public static String[] parse(String msg) {
+	private String[] getTbNames(String msg) {
 		return msg.trim().split(";");
 	}
 
-	final public static TestFlow[] query(String... names) throws Exception {
-		TestFlow[] tfs = new TestFlow[names.length];
-		for(int i = 0; i < names.length; i++) {
-			String name = names[i].trim();
-			TestFlow tf = searchInFlows(name);
-			if(tf == null) {
-				throw new Exception("Unknown tb: " + name);
-			}
-			tfs[i] = tf;
+	private void setTestStartTime() {
+		this.currentTp.testStartTime = System.currentTimeMillis();
+	}
+
+	private String getTpPath() {
+		return KSystemVariable.read("ECOTS_SD_TPPATH");
+	}
+
+	private String getTpClassName() {
+		return KSystemVariable.read("ECOTS_SD_TPCLASS")
+			.replaceAll(".class", "")
+			.replaceAll("/", "."); //like "javaapi.tea3628sh0401_192b"
+	}
+
+	private Object newInstance(String clsName) {
+		try {
+			Class<?> cls = this.tpLoader.load(clsName);
+			return cls.newInstance();
+		} catch(Exception e) {
+			throw new RuntimeException(e);
 		}
-		return tfs;
 	}
 
-	final public static TestItem[] queryTestItems(String... names) throws Exception {
-		TestFlow[] tfs = query(names);
-		return til.getList(tfs);
+	private Map<String, KTestItem[]> getTestItemArrayMap() {
+		KTestItemRegistry tbReg = (KTestItemRegistry)Ano.fieldValue(
+				KDeviceTestProgram.class, this, "testItemRegistry");
+		return tbReg.getTestItemArrayMap();
 	}
 
-	private static TestFlow searchInFlows(String name) throws Exception {
-		for(String flow : flowOrder) {
-			if(! map.containsKey(flow)) {
+	private KTestItem search(Map<String, KTestItem[]> map, String name) {
+		for(String flow : FlowSearchOrder.values()) {
+			KTestItem[] tbArr = map.get(flow);
+			if(tbArr == null) {
 				continue;
 			}
-			TestFlow tf = map.get(flow).get(name);
-			if(tf != null) {
-				System.out.printf("%s from %s\n", tf.testName, flow);
-				printFlowItem(tf);
-				return tf;
+
+			for(KTestItem tb : tbArr) {
+				if(name.equals(tb.getName())) {
+					System.out.printf("%s: %s\n", flow, name);
+					printTB(tb);
+					return tb;
+				}
 			}
 		}
 		return null;
 	}
 
-	private static void printFlowItem(TestFlow tf) {
-		Field[] fds = TestFlow.class.getDeclaredFields();
-		for(Field fd : fds) {
-			fd.setAccessible(true);
-			try {
-				if(! "testName".equals(fd.getName())) {
-					System.out.printf("\t%s: %s\n", fd.getName(), String.valueOf(fd.get(tf)));
-				}
-			} catch(Exception e) {
-				throw new RuntimeException(e);
+	private void printTB(KTestItem tb) {
+		Class<?> tbCls = this.tpLoader.load("javaapi.TestItem");
+		System.out.printf("\tFailBin: %d\n", (Integer)Ano.fieldValue(tbCls, tb, "fail"));
+		System.out.printf("\tIgnoreBit: %d\n", (Integer)Ano.fieldValue(tbCls, tb, "ignorebit"));
+		System.out.printf("\tPage: 0x%X\n", (Integer)Ano.fieldValue(tbCls, tb, "page"));
+		System.out.printf("\tCol: 0x%X\n", (Integer)Ano.fieldValue(tbCls, tb, "col"));
+	}
+
+	private KTestItem[] getTestItemArr(String... tbNames) throws Exception {
+		Map<String, KTestItem[]> map = getTestItemArrayMap();
+		KTestItem[] tbArr = new KTestItem[tbNames.length];
+		for(int i = 0; i < tbArr.length; i += 1) {
+			tbArr[i] = search(map, tbNames[i]);
+			if(tbArr[i] == null) {
+				throw new Exception("Unknown " + tbNames[i]);
 			}
 		}
+		return tbArr;
 	}
 
-	private static void stat() {
-		System.out.println("\t[Length]\t[Flow]");
-		for(Map.Entry<String, Map<String, TestFlow>> kv : map.entrySet()) {
-			System.out.printf("\t%d\t\t%s\n", kv.getValue().size(), kv.getKey());
-		}
+	final public void addFlow(String flow, KTestItem[] tbArr) {
+		Object fd = Ano.fieldValue(KDeviceTestProgram.class, this, "testItemRegistry");
+		registerTestItem((KTestItemRegistry)fd, flow, tbArr);
 	}
 
-	private static List<TestFlow> itemsOf(String name) {
+}
+
+
+class Ano {
+	final public static void setField(Class<?> cls, Object obj, String fdName, Object val) {
 		try {
-			Field flow = flowClass.getDeclaredField(name);
-			return Arrays.asList((TestFlow[])flow.get(null));
+			Field fd = cls.getDeclaredField(fdName);
+			fd.setAccessible(true);
+			fd.set(obj, val);
 		} catch(Exception e) {
 			throw new RuntimeException(e);
 		}
 	}
 
-	private static List<String> flowNames() {
-		List<String> flows = new ArrayList<String>();
-		for(Field fd : flowClass.getDeclaredFields()) {
-			if(TestFlow[].class == fd.getType()) {
-				flows.add(fd.getName());
-			}
+	final public static Object fieldValue(Class<?> cls, Object obj, String fdName) {
+		try {
+			Field fd = cls.getDeclaredField(fdName);
+			fd.setAccessible(true);
+			return fd.get(obj);
+		} catch(Exception e) {
+			throw new RuntimeException(e);
 		}
-		return flows;
+	}
+
+	final public static Method getMethod(Class<?> cls, String mdName, Class<?>... parameterTypes) {
+		try {
+			Method md = cls.getDeclaredMethod(mdName, parameterTypes);
+			md.setAccessible(true);
+			return md;
+		} catch(Exception e) {
+			throw new RuntimeException(e);
+		}
 	}
 }
 
-class Inject {
-	final private static String targetFlow = "Debug";
-	final private static Class<?> cls =  KDeviceTestProgram.class;
-	private KDeviceTestProgram obj;
+class TpClassLoader {
+	final private URLClassLoader urlClassLoader;
 
-	private Inject(KDeviceTestProgram obj) {
-		this.obj = obj;
-	}
-
-	final public static String getTargetFlow() {
-		return new String(targetFlow);
-	}
-
-	final public static boolean isTargetFlow(String msg) {
-		return targetFlow.equals(SS.testStep);
-	}
-
-	final public static Inject into(KDeviceTestProgram obj) {
-		return new Inject(obj);
-	}
-
-	final public void update(TestItem ...tbs) {
+	private TpClassLoader(String path) {
 		try {
-			Field fd = cls.getDeclaredField("testItemRegistry");
-			fd.setAccessible(true);
-			KTestItemRegistry registry = (KTestItemRegistry)fd.get(obj);
-
-			Method md = cls.getDeclaredMethod("registerTestItem", KTestItemRegistry.class, String.class, KTestItem[].class);
-			md.setAccessible(true);
-			md.invoke(obj, registry, Inject.getTargetFlow(), tbs);
-		} catch(Exception e) {
+			urlClassLoader = URLClassLoader.newInstance(new URL[] {
+					new URL("file:///" + path.trim())	// "file:////home/kei/sandbox/users/wufeng/21144/T5773_BiCs3_2048Gb_X3_LGA70_S3E_8D1CE_tam3640af0980_768c/tam3640/"
+					});
+		} catch(MalformedURLException e) {
 			throw new RuntimeException(e);
 		}
 	}
+
+	final public static TpClassLoader from(String path) {
+		return new TpClassLoader(path);
+	}
+
+	final public Class<?> load(String className) {
+		try {
+			return urlClassLoader.loadClass(className);
+		} catch(ClassNotFoundException e) {
+			throw new RuntimeException(e);
+		}
+	}
+}
+
+class FlowSearchOrder {
+	final public static String[] values() {
+		return arr;
+	}
+	private static String[] arr = {
+		"FH",
+		"FR",
+		"FL",
+		"SH",
+		"CFH",
+		"CSH",
+		"QH",
+		"QR",
+		"QL",
+		"CH",
+		"CR",
+		"CL",
+		"Debug",
+		"DebugPats",
+	};
 }
 
 class Signal {
