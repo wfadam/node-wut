@@ -187,7 +187,7 @@ class TpClassLoader {
 	private TpClassLoader(String path) {
 		try {
 			urlClassLoader = URLClassLoader.newInstance(new URL[] {
-					new URL("file:///" + path.trim())	// "file:////home/kei/sandbox/users/wufeng/21144/T5773_BiCs3_2048Gb_X3_LGA70_S3E_8D1CE_tam3640af0980_768c/tam3640/"
+					new URL("file:///" + path.trim())	// "file:////home/kei/sandbox//tam4567/"
 					});
 		} catch(MalformedURLException e) {
 			throw new RuntimeException(e);
