@@ -4,6 +4,7 @@ import java.util.Map;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 
+import com.advantest.kei.KTestSystem;
 import com.advantest.kei.KSystemVariable;
 import com.advantest.kei.KDeviceTestProgram;
 import com.advantest.kei.KTestItemRegistry;
@@ -16,13 +17,18 @@ import java.net.URLClassLoader;
 import java.net.MalformedURLException;
 import java.net.URL;
 
+import java.io.File;//a8w4db
+
 public class Agent extends KDeviceTestProgram implements IKNoMoreTargetDutAction {
 	final private String targetFlow = "Debug";
 	private KDeviceTestProgram currentTp;
 	private TpClassLoader tpLoader;
 
 	@Override public void initializeVariableRegistry(KVariableRegistry arg0) {
-		this.tpLoader = TpClassLoader.from(getTpPath());
+		String tpPath = getTpPath();
+		addClassPath(tpPath);
+
+		this.tpLoader = TpClassLoader.from(tpPath);
 		this.currentTp = (KDeviceTestProgram)newInstance(getTpClassName());
 		this.currentTp.initializeVariableRegistry(arg0);
 	}
@@ -146,6 +152,18 @@ public class Agent extends KDeviceTestProgram implements IKNoMoreTargetDutAction
 		registerTestItem((KTestItemRegistry)fd, flow, tbArr);
 	}
 
+	private void addClassPath(String path) {
+		try {
+			URLClassLoader urlClassLoader = (URLClassLoader) ClassLoader.getSystemClassLoader();
+			Method method = URLClassLoader.class.getDeclaredMethod("addURL", new Class[]{URL.class});
+			method.setAccessible(true);
+
+			URL u = new File(path).toURI().toURL(); System.out.println(u);
+			method.invoke(urlClassLoader, new Object[]{u});
+		} catch(Exception e) {
+			throw new RuntimeException(e);
+		}
+	}
 }
 
 
